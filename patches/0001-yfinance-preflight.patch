@@ -1,0 +1,199 @@
+diff --git a/agent/requirements.txt b/agent/requirements.txt
+index f14570d..7cffcd2 100644
+--- a/agent/requirements.txt
++++ b/agent/requirements.txt
+@@ -34,7 +34,7 @@ pyharmonics>=1.5.0
+ # Data Providers
+ tushare>=1.2.89
+ requests>=2.31.0
+-yfinance>=0.2.30
++yfinance>=0.2.58
+ akshare>=1.12.0
+ ccxt>=4.0.0
+ 
+diff --git a/agent/src/preflight.py b/agent/src/preflight.py
+index c3cd808..0f49965 100644
+--- a/agent/src/preflight.py
++++ b/agent/src/preflight.py
+@@ -21,7 +21,7 @@ class CheckResult:
+     """Result of a single preflight check."""
+ 
+     name: str
+-    status: str  # "ready", "error", "not_configured", "skipped"
++    status: str  # "ready", "error", "degraded", "not_configured", "skipped"
+     message: str
+     impact: str  # what breaks if this fails
+     critical: bool = False
+@@ -202,6 +202,44 @@ def _check_okx() -> CheckResult:
+         )
+ 
+ 
++# yfinance releases before this one are blocked by Yahoo's TLS fingerprinting
++# and report a permanent "Too Many Requests" regardless of request volume.
++_YFINANCE_MIN_UNTHROTTLED = (0, 2, 58)
++
++
++def _is_rate_limit_error(exc: BaseException) -> bool:
++    """Return True when ``exc`` is Yahoo throttling rather than a real outage."""
++    if type(exc).__name__ == "YFRateLimitError":
++        return True
++    text = str(exc).lower()
++    return "too many requests" in text or "rate limit" in text or "429" in text
++
++
++def _yfinance_version_tuple() -> Optional[tuple]:
++    """Return the installed yfinance version as an int tuple, if parseable."""
++    try:
++        from importlib.metadata import version
++
++        parts = []
++        for piece in version("yfinance").split(".")[:3]:
++            digits = "".join(ch for ch in piece if ch.isdigit())
++            if not digits:
++                break
++            parts.append(int(digits))
++        return tuple(parts) if parts else None
++    except Exception:
++        return None
++
++
++def _rate_limit_message() -> str:
++    """Build the rate-limit message, with an upgrade hint for old yfinance."""
++    installed = _yfinance_version_tuple()
++    if installed is not None and installed < _YFINANCE_MIN_UNTHROTTLED:
++        current = ".".join(str(part) for part in installed)
++        return f"rate limited by Yahoo; yfinance {current} is outdated - run `pip install -U yfinance`"
++    return "rate limited by Yahoo (temporary, retried on demand)"
++
++
+ def _check_yfinance() -> CheckResult:
+     """Check yfinance availability."""
+     try:
+@@ -223,6 +261,15 @@ def _check_yfinance() -> CheckResult:
+             return CheckResult(name="yfinance", status="ready", message="reachable", impact="")
+         return CheckResult(name="yfinance", status="ready", message="reachable (no price data)", impact="")
+     except Exception as exc:
++        if _is_rate_limit_error(exc):
++            # Yahoo answered, so the source is reachable; the throttle is
++            # temporary and backtests fall back to other loaders meanwhile.
++            return CheckResult(
++                name="yfinance",
++                status="degraded",
++                message=_rate_limit_message(),
++                impact="US/HK equity data falls back to akshare until Yahoo lifts the limit",
++            )
+         return CheckResult(
+             name="yfinance",
+             status="error",
+@@ -286,6 +333,7 @@ def _check_ccxt() -> CheckResult:
+ _STATUS_DISPLAY = {
+     "ready": ("[green]OK[/green]", "green"),
+     "error": ("[red]FAIL[/red]", "red"),
++    "degraded": ("[yellow]WARN[/yellow]", "yellow"),
+     "not_configured": ("[yellow]N/A[/yellow]", "yellow"),
+     "skipped": ("[dim]SKIP[/dim]", "dim"),
+ }
+@@ -325,7 +373,7 @@ def run_preflight(console: Optional[Console] = None) -> List[CheckResult]:
+     for r in results:
+         icon, color = _STATUS_DISPLAY[r.status]
+         detail = r.message
+-        if r.status in ("error", "not_configured") and r.impact:
++        if r.status in ("error", "degraded", "not_configured") and r.impact:
+             detail = f"{r.message} ({r.impact})"
+         table.add_row(icon, f"[{color}]{r.name}[/{color}]", f"[{color}]{detail}[/{color}]")
+ 
+diff --git a/agent/tests/test_preflight.py b/agent/tests/test_preflight.py
+index 75b923a..6b3e9ad 100644
+--- a/agent/tests/test_preflight.py
++++ b/agent/tests/test_preflight.py
+@@ -26,3 +26,77 @@ def test_akshare_check_skips_when_missing(monkeypatch) -> None:
+ 
+     assert result.status == "skipped"
+     assert result.message == "package not installed"
++
++
++class YFRateLimitError(Exception):
++    """Stand-in for yfinance's rate-limit exception (matched by name)."""
++
++
++def _install_fake_yfinance(monkeypatch, exc: Exception) -> None:
++    import types
++
++    class _Ticker:
++        def __init__(self, symbol: str) -> None:
++            self.symbol = symbol
++
++        @property
++        def fast_info(self):
++            raise exc
++
++    fake = types.ModuleType("yfinance")
++    fake.Ticker = _Ticker
++    monkeypatch.setitem(sys.modules, "yfinance", fake)
++
++
++def test_yfinance_rate_limit_is_degraded_not_failed(monkeypatch) -> None:
++    """A Yahoo throttle is temporary; it must not be reported as a failure."""
++    _install_fake_yfinance(monkeypatch, YFRateLimitError("Too Many Requests. Rate limited. Try after a while."))
++    monkeypatch.setattr(preflight, "_yfinance_version_tuple", lambda: (0, 2, 66))
++
++    result = preflight._check_yfinance()
++
++    assert result.status == "degraded"
++    assert "rate limited" in result.message
++    assert "pip install" not in result.message
++    assert not result.critical
++
++
++def test_yfinance_rate_limit_suggests_upgrade_for_old_version(monkeypatch) -> None:
++    _install_fake_yfinance(monkeypatch, YFRateLimitError("Too Many Requests. Rate limited. Try after a while."))
++    monkeypatch.setattr(preflight, "_yfinance_version_tuple", lambda: (0, 2, 54))
++
++    result = preflight._check_yfinance()
++
++    assert result.status == "degraded"
++    assert "yfinance 0.2.54 is outdated" in result.message
++    assert "pip install -U yfinance" in result.message
++
++
++def test_yfinance_other_errors_still_fail(monkeypatch) -> None:
++    _install_fake_yfinance(monkeypatch, ConnectionError("network unreachable"))
++
++    result = preflight._check_yfinance()
++
++    assert result.status == "error"
++    assert "ConnectionError" in result.message
++
++
++def test_run_preflight_renders_degraded_status(monkeypatch) -> None:
++    from rich.console import Console
++
++    degraded = preflight.CheckResult(
++        name="yfinance", status="degraded", message="rate limited by Yahoo", impact="falls back to akshare"
++    )
++    ready = preflight.CheckResult(name="LLM", status="ready", message="ok", impact="")
++    for fn_name in ("_check_llm_provider", "_check_okx", "_check_tushare", "_check_akshare", "_check_ccxt"):
++        monkeypatch.setattr(preflight, fn_name, lambda: ready)
++    monkeypatch.setattr(preflight, "_check_yfinance", lambda: degraded)
++
++    console = Console(record=True, width=200)
++    results = preflight.run_preflight(console)
++    output = console.export_text()
++
++    assert degraded in results
++    assert "WARN" in output
++    assert "FAIL" not in output
++    assert "falls back to akshare" in output
+diff --git a/pyproject.toml b/pyproject.toml
+index 329e6ca..e487481 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -48,7 +48,7 @@ dependencies = [
+     "pyharmonics>=1.5.0",
+     "tushare>=1.2.89",
+     "requests>=2.31.0",
+-    "yfinance>=0.2.30",
++    "yfinance>=0.2.58",
+     "akshare>=1.12.0",
+     "ccxt>=4.0.0",
+     "fastapi>=0.104.0",
