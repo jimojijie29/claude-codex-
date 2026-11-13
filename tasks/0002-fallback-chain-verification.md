@@ -46,3 +46,40 @@
 ## 交付
 
 有代码改动就向 `william` 提 PR，标题以 `[0002]` 开头；只有调查结论、没有代码改动时不必提 PR。两种情况都要写回报 `reports/0002-fallback-chain-verification.md`。
+
+---
+
+## 返工 R1（2026-11-13，Claude 验收意见）
+
+PR #2 的补取逻辑和测试通过验收，回报如实。合并前需要补一处，在同一个 PR 分支 `codex/0002-fallback-chain` 上追加提交即可。
+
+### 要改的问题：运行卡片记录的数据源与实际不符
+
+`runner.py` 的 `main` 在取数后写入：
+
+```python
+if source == "auto":
+    config["_run_card_effective_sources"] = sorted(_group_codes_by_source(codes))
+else:
+    config["_run_card_effective_sources"] = [source]
+```
+
+这两个分支都是按代码**推断**来源，不是按**实际**取到数据的来源。本 PR 之前，指定源模式下要么全部来自主源、要么全部来自一个后备源（此时 `source` 被改写），记录是准的。本 PR 引入逐只补取后，一次回测可以同时用 yfinance 和 akshare 的数据，而卡片只写 `["yfinance"]`。两个源的复权口径不同（你在回报第 4 点已指出），卡片不如实记录的话，事后无法判断一次回测的价格口径。`auto` 模式在发生后备时原本就有同样的偏差，一并修掉。
+
+### 要求
+
+1. 两条取数路径都要记下每只股票实际来自哪个数据源。`_fetch_auto` 目前只返回数据字典，可以改返回值或另加参数带回这份映射，方式由你定，但不要用模块级全局变量。
+2. `config["_run_card_effective_sources"]` 写入实际用到的数据源集合（排序后的列表）。先看 `agent/backtest/engines/base.py` 第 39 行附近对这个字段的用法，保持它期望的类型不变。
+3. 同一市场内的股票来自不止一个数据源时，输出一条 warning，写明哪些代码来自哪个源，并说明不同来源的复权口径可能不同。
+4. 补单元测试：全部来自主源、全部来自后备源、混合来源三种情况下，`_run_card_effective_sources` 的值正确；混合时有 warning。指定源和 `auto` 两种模式都要覆盖。
+
+### 不要做的
+
+- 不统一复权口径，不改 `yfinance_loader.py` 或 `akshare_loader.py` 的取数参数。这是独立的设计决定，会另开任务。
+- 不改"缺失标的只告警、回测继续"的现有策略。
+- 不重跑真实联网验证。网络问题会另行处理。
+
+### 验收
+
+- `cd agent && python -m pytest tests/test_fallback_chain_task.py tests/test_registry.py tests/test_akshare_loader.py tests/test_preflight.py -q --disable-socket` 全部通过，输出贴进回报。
+- 在 `reports/0002-fallback-chain-verification.md` 末尾追加 "返工 R1" 一节，不要改动原有内容。
