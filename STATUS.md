@@ -5,10 +5,10 @@
 | 编号 | 任务 | 状态 | 依赖 | PR | 回报 |
 | --- | --- | --- | --- | --- | --- |
 | 0001 | [yfinance 限流误报修复](tasks/0001-yfinance-preflight.md) | 验收通过，待用户合并 | 无 | [Vibe-Trading-William#1](https://github.com/jimojijie29/Vibe-Trading-William/pull/1) | [回报](reports/0001-yfinance-preflight.md) |
-| 0002 | [实测美股、港股的后备数据源](tasks/0002-fallback-chain-verification.md) | 待领取（返工 R1，见任务单末尾） | 无 | [Vibe-Trading-William#2](https://github.com/jimojijie29/Vibe-Trading-William/pull/2) | [回报](reports/0002-fallback-chain-verification.md) |
+| 0002 | [实测美股、港股的后备数据源](tasks/0002-fallback-chain-verification.md) | 验收通过，待用户合并 | 无 | [Vibe-Trading-William#2](https://github.com/jimojijie29/Vibe-Trading-William/pull/2) | [回报](reports/0002-fallback-chain-verification.md) |
 | 0003 | [让 CI 在 william 分支上运行](tasks/0003-ci-on-william.md) | 待领取 | 无 | | |
 | 0004 | [诊断并修复东方财富接口的连接失败](tasks/0004-eastmoney-network-diagnosis.md) | 待领取 | 无 | | |
-| 0005 | [美股、港股价格统一为前复权](tasks/0005-unify-forward-adjusted-prices.md) | 待领取 | 0002 返工 R1 合并 | | |
+| 0005 | [美股、港股价格统一为前复权](tasks/0005-unify-forward-adjusted-prices.md) | 待领取 | PR #2 合并后才可开始 | | |
 
 ## 验收记录
 
@@ -29,4 +29,11 @@
 - 实测结论（Codex 如实报告）：用户当前网络下，美股经 akshare 后备成功过一次，之后不稳定；港股一次都没跑通。Yahoo 被限流，东方财富接口经代理频繁断连。**后备链在代码上成立，但在当前网络下不可靠。**
 - 用户决定（2026-11-13）：美股、港股统一为前复权，见任务 0005。用户网络为代理的绕过大陆模式，东方财富断连的原因待诊断，见任务 0004。缺失标的的处理用户未表态，维持告警后继续。
 - 更正：yfinance 的 `Close` 已按拆股调整，只是不含分红，并非完全不复权。
+
+### 0002 返工 R1（2026-11-13，通过）
+
+- 追加提交 `f8a55fa`，只改 `runner.py` 和测试文件，符合返工范围。
+- 两条取数路径都按实际返回的数据记录每只股票的来源，`_run_card_effective_sources` 写入实际来源的排序列表，类型与 `engines/base.py` 的读取方式一致。同一市场混用来源时有 warning。没有使用全局变量。
+- Claude 禁网复跑 `test_fallback_chain_task.py`、`test_registry.py`、`test_backtest_runner_security.py`、`test_preflight.py`、`test_market_detection.py`、`test_engine_robustness.py`、`test_hypothesis_registry.py`、`test_run_card.py`：77 通过，1 跳过，2 失败。2 个失败都是 `test_run_card.py` 里的 `ModuleNotFoundError`，原因是 Claude 的容器没装全项目依赖，与本 PR 无关。
+- 遗留：真实联网验证未完成（美股不稳定，港股未跑通），由任务 0004 处理。
 
