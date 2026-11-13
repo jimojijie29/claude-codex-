@@ -11,7 +11,7 @@
 | 0003 | [让 CI 在 william 分支上运行](tasks/0003-ci-on-william.md) | 验收通过，待用户合并 | 无 | [Vibe-Trading-William#3](https://github.com/jimojijie29/Vibe-Trading-William/pull/3) | [回报](reports/0003-ci-on-william.md) |
 | 0004 | [诊断并修复东方财富接口的连接失败](tasks/0004-eastmoney-network-diagnosis.md) | 待领取 | 无 | | |
 | 0005 | [美股、港股价格统一为前复权](tasks/0005-unify-forward-adjusted-prices.md) | 待领取 | PR #2 合并后才可开始 | | |
-| 0006 | [修复依赖版本漂移导致的后端测试失败](tasks/0006-dependency-drift-failures.md) | 待领取 | PR #3 合并后才可开始 | | |
+| 0006 | [修复依赖漂移与接口不一致导致的后端测试失败](tasks/0006-dependency-drift-failures.md) | 待领取 | PR #3 合并后才可开始 | | |
 | 0007 | [处理图表 HTML 测试的失败](tasks/0007-chart-html-tests.md) | 待领取 | PR #3 合并后才可开始 | | |
 | 0008 | [处理前端测试与界面文字不一致的失败](tasks/0008-frontend-test-text.md) | 待领取 | PR #3 合并后才可开始 | | |
 
@@ -47,6 +47,6 @@
 - PR 提交 `ac00f8a`，只改 `.github/workflows/test.yml`：增加 `william` 触发，后端与前端拆成并行 job，超时调到 20 分钟。没有改业务代码，没有新增 `skip` 或 `xfail`。
 - Claude 读取了 [CI 运行](https://github.com/jimojijie29/Vibe-Trading-William/actions/runs/43347475219) 的日志，与回报一致：后端 3496 通过、18 失败、6 跳过；本地 MCP 集成测试 14 个通过；前端 198 通过、13 失败。完整运行约 5 分钟。
 - 被排除的 9 个联网测试原本就带 `integration` 标记，不是本次新加的。
-- CI 是红的，这是 `william` 的真实基线，符合任务单的要求。31 个失败拆成任务 0006、0007、0008 处理。
+- CI 是红的，这是 `william` 的真实基线，符合任务单的要求。31 个失败拆成三张任务单：0006（后端 11 个）、0007（后端 7 个）、0008（前端 13 个）。
 - 更正：0002 验收时，Claude 把 `test_akshare_loader.py` 的 5 个外汇测试失败归因于自己的容器没装 akshare。CI 里装了 akshare，这 5 个同样失败，说明新版 akshare 下外汇识别确实失效，是真实缺陷，见任务 0006。
 
