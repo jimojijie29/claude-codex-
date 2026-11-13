@@ -84,3 +84,19 @@ python -X utf8 -m pytest tests/test_registry.py tests/test_futu_loader.py -q --d
 - 本任务未统一复权和成交量口径，建议单独决定数据标准；新修复可在同一组合内混用不同来源的价格，回测解释应考虑此风险。
 - Yahoo 限流、东方财富代理断连均属于环境/上游连接问题，不能仅靠本任务范围内的后备逻辑保证真实回测成功。建议在网络恢复后重跑四个组合并记录行数。
 - 新增缺失标的 warning；若要求缺标的时回测强制失败，应另行确定产品策略。
+
+## 返工 R1
+
+- **结果**：完成，已追加到 [PR #2](https://github.com/jimojijie29/Vibe-Trading-William/pull/2)，提交 `f8a55fa`，尚未合并。
+- `agent/backtest/runner.py`：在指定源和 auto 路径按实际返回数据记录每个标的的来源；运行卡片字段 `_run_card_effective_sources` 使用实际来源去重排序后的列表。同一市场混用来源时输出来源、对应代码和复权口径可能不同的 warning。
+- `agent/tests/test_fallback_chain_task.py`：两种模式分别覆盖全部主源、全部后备源和混合来源，并检查混合来源告警。
+- 先运行新测试，修改前结果为 `3 failed, 13 passed`：auto 全回退仍记为 yfinance，两种混合模式均漏记 akshare。
+- 修改后在 `agent` 下以项目虚拟环境禁网运行：
+
+```text
+D:\AI_Tools\finance\Vibe-Trading\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_fallback_chain_task.py tests/test_registry.py tests/test_akshare_loader.py tests/test_preflight.py -q --disable-socket --basetemp=C:/Users/Administrator/.codex/worktrees/fallback-chain/pytest-r1-final
+.......................................................                  [100%]
+55 passed in 2.26s
+```
+
+- 按要求未重跑联网验证，未修改价格复权方式或缺失标的处理策略。混合来源的复权问题由任务 0005 处理。
